@@ -23,4 +23,5 @@ export interface Question {
   correctAnswer?: number; // Index for multiple choice
   subjectiveAnswer?: string; // Answer string for subjective
   solution: string;
+  hints: string[];
 }

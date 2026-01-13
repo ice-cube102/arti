@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Play, CheckCircle, Award, ChevronRight, ChevronLeft, Flag, Keyboard, User, Rocket, XCircle, HelpCircle, AlertCircle, Skull, Lock } from 'lucide-react';
+import { Play, CheckCircle, Award, ChevronRight, ChevronLeft, Flag, Keyboard, User, Rocket, XCircle, HelpCircle, AlertCircle, Skull, Lock, Lightbulb } from 'lucide-react';
 import { questions } from './questions';
 import { Question, ExamState, Difficulty } from './types';
 import { MathText } from './components/MathText';
@@ -101,7 +101,9 @@ const QuestionCard = ({
   qIndex, 
   onNext, 
   onPrev, 
-  isLast 
+  isLast,
+  hintsRevealedCount,
+  onRevealHint
 }: { 
   question: Question, 
   userAnswer: string | number | undefined, 
@@ -109,7 +111,9 @@ const QuestionCard = ({
   qIndex: number,
   onNext: () => void,
   onPrev: () => void,
-  isLast: boolean
+  isLast: boolean,
+  hintsRevealedCount: number,
+  onRevealHint: () => void
 }) => {
   const [inputValue, setInputValue] = useState("");
   const isDevMode = inputValue === "ice_cube102";
@@ -118,6 +122,8 @@ const QuestionCard = ({
   useEffect(() => {
     if (question.type === 'subjective') {
       setInputValue(userAnswer ? String(userAnswer) : "");
+    } else {
+      setInputValue("");
     }
   }, [question.id, userAnswer]);
 
@@ -127,6 +133,18 @@ const QuestionCard = ({
     onAnswer(val);
   };
 
+  const getMultiplier = (count: number) => {
+    switch(count) {
+      case 1: return 0.75;
+      case 2: return 0.5;
+      case 3: return 0.25;
+      default: return 1;
+    }
+  }
+
+  const currentMultiplier = getMultiplier(hintsRevealedCount);
+  const nextHintCost = hintsRevealedCount < 3 ? getMultiplier(hintsRevealedCount + 1) : 0.25;
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -135,7 +153,7 @@ const QuestionCard = ({
         </span>
         <div className="flex items-center gap-3">
             <span className={`text-sm font-extrabold px-3 py-1 rounded-lg ${isCursed ? 'bg-red-900 text-red-100' : 'bg-slate-100 text-slate-700'}`}>
-              {question.points}점
+              {question.points}점 {hintsRevealedCount > 0 && <span className="text-red-500 text-xs ml-1">(-{(1-currentMultiplier)*100}%)</span>}
             </span>
             <span className={`px-3 py-1 rounded-lg text-xs font-bold border shadow-sm
             ${question.difficulty === Difficulty.Concept ? 'bg-green-100 text-green-800 border-green-200' : ''}
@@ -208,6 +226,41 @@ const QuestionCard = ({
                   <Rocket className="w-4 h-4" /> CHEAT CODE ACTIVATED
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Hint Section - Hide for Cursed or empty hints */}
+          {!isCursed && question.hints.length > 0 && (
+            <div className="mt-8 pt-6 border-t border-slate-100">
+               <div className="flex items-center justify-between mb-4">
+                 <div className="text-sm font-bold text-slate-400 flex items-center gap-2">
+                   <Lightbulb className="w-4 h-4" /> HINTS ({hintsRevealedCount}/3)
+                 </div>
+                 {hintsRevealedCount < 3 && (
+                   <button 
+                    onClick={onRevealHint}
+                    className="text-xs font-bold text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors border border-amber-200 flex items-center gap-1"
+                   >
+                     힌트 열기 (배점 {nextHintCost*100}%)
+                   </button>
+                 )}
+               </div>
+               
+               <div className="space-y-3">
+                 {question.hints.map((hint, idx) => (
+                   <div 
+                     key={idx} 
+                     className={`p-4 rounded-xl text-sm transition-all duration-500 flex items-start gap-3
+                       ${idx < hintsRevealedCount 
+                         ? 'bg-amber-50/50 text-slate-700 border border-amber-100 opacity-100 translate-y-0' 
+                         : 'bg-slate-50 text-slate-300 border border-slate-100 opacity-50 hidden'}
+                     `}
+                   >
+                     <span className="font-bold text-amber-500 whitespace-nowrap">HINT {idx + 1}</span>
+                     <span><MathText text={hint} /></span>
+                   </div>
+                 ))}
+               </div>
             </div>
           )}
       </div>
@@ -335,7 +388,9 @@ const ExamView = ({
   setCurrentQIndex, 
   handleAnswer, 
   handleSubmit,
-  isCursedMode 
+  isCursedMode,
+  hintsRevealed,
+  handleRevealHint
 }: {
   timeLeft: number;
   userAnswers: Record<number, string | number>;
@@ -344,6 +399,8 @@ const ExamView = ({
   handleAnswer: (val: string | number) => void;
   handleSubmit: () => void;
   isCursedMode: boolean;
+  hintsRevealed: Record<number, number>;
+  handleRevealHint: (qId: number) => void;
 }) => {
   const currentQuestion = questions[currentQIndex];
 
@@ -377,17 +434,22 @@ const ExamView = ({
               {questions.slice(0, 20).map((q, idx) => {
                 const isAnswered = userAnswers[q.id] !== undefined && userAnswers[q.id] !== "";
                 const isCurrent = currentQIndex === idx;
+                const hintCount = hintsRevealed[q.id] || 0;
+                
                 return (
                   <button
                     key={q.id}
                     onClick={() => setCurrentQIndex(idx)}
                     className={`
-                      aspect-square rounded-xl text-sm font-bold flex items-center justify-center transition-all shadow-sm
+                      aspect-square rounded-xl text-sm font-bold flex items-center justify-center transition-all shadow-sm relative
                       ${isCurrent ? 'bg-indigo-600 text-white ring-4 ring-indigo-100 scale-110 z-10' : 
                         isAnswered ? 'bg-indigo-50 text-indigo-600 border border-indigo-200' : 'bg-white text-slate-300 border border-slate-200 hover:border-indigo-300'}
                     `}
                   >
                     {idx + 1}
+                    {hintCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border border-white"></span>
+                    )}
                   </button>
                 );
               })}
@@ -432,6 +494,8 @@ const ExamView = ({
               }
             }}
             isLast={isCursedMode || currentQIndex === 19}
+            hintsRevealedCount={hintsRevealed[currentQuestion.id] || 0}
+            onRevealHint={() => handleRevealHint(currentQuestion.id)}
           />
         </div>
       </main>
@@ -447,7 +511,7 @@ const ResultView = ({
   hasUnlockedHidden
 }: { 
   resultData: any, 
-  userName: string,
+  userName: string, 
   showSolutionFor: number | null, 
   setShowSolutionFor: (id: number | null) => void,
   hasUnlockedHidden: boolean
@@ -532,7 +596,14 @@ const ResultView = ({
                         <span className={`text-xs px-2 py-1 rounded-md font-bold border
                           ${item.difficulty === Difficulty.Cursed ? 'bg-black text-red-500 border-red-500' : 'bg-slate-100 text-slate-500 border-slate-200'}
                         `}>{item.difficulty}</span>
-                        <span className="text-xs font-semibold text-slate-400 bg-slate-50/10 px-2 py-1 rounded-md">{item.points}점</span>
+                        <span className="text-xs font-semibold text-slate-400 bg-slate-50/10 px-2 py-1 rounded-md">
+                          {item.earnedPoints} / {item.points}점
+                        </span>
+                        {item.hintCount > 0 && (
+                          <span className="text-xs font-bold text-amber-500 bg-amber-50 px-2 py-1 rounded border border-amber-100">
+                             힌트 {item.hintCount}개 사용
+                          </span>
+                        )}
                       </div>
                       <div className={`text-base font-medium line-clamp-1 max-w-lg ${hasUnlockedHidden ? 'text-slate-400' : 'text-slate-600'}`}>
                         <MathText text={item.question} />
@@ -629,6 +700,7 @@ export default function App() {
   const [showSolutionFor, setShowSolutionFor] = useState<number | null>(null);
   const [userName, setUserName] = useState("");
   const [hasUnlockedHidden, setHasUnlockedHidden] = useState(false);
+  const [hintsRevealed, setHintsRevealed] = useState<Record<number, number>>({});
 
   // Timer logic
   useEffect(() => {
@@ -651,6 +723,7 @@ export default function App() {
     setGameState('exam');
     setTimeLeft(90 * 60);
     setUserAnswers({});
+    setHintsRevealed({});
     setCurrentQIndex(0);
     setUserName("");
     setHasUnlockedHidden(false);
@@ -660,6 +733,13 @@ export default function App() {
     setUserAnswers((prev) => ({
       ...prev,
       [questions[currentQIndex].id]: val
+    }));
+  };
+
+  const handleRevealHint = (qId: number) => {
+    setHintsRevealed(prev => ({
+      ...prev,
+      [qId]: Math.min((prev[qId] || 0) + 1, 3)
     }));
   };
 
@@ -711,6 +791,14 @@ export default function App() {
       if (!hasUnlockedHidden && q.id === 21) return null;
 
       const userAnswer = userAnswers[q.id];
+      const hintCount = hintsRevealed[q.id] || 0;
+      
+      // Calculate multiplier
+      let multiplier = 1;
+      if (hintCount === 1) multiplier = 0.75;
+      else if (hintCount === 2) multiplier = 0.5;
+      else if (hintCount === 3) multiplier = 0.25;
+
       let isCorrect = false;
 
       if (q.type === 'multiple-choice') {
@@ -725,24 +813,26 @@ export default function App() {
            isCorrect = cleanUser === cleanCorrect;
         }
       }
+      
+      const earnedPoints = isCorrect ? q.points * multiplier : 0;
 
       if (isCorrect) {
-        totalScore += q.points;
+        totalScore += earnedPoints;
         correctCount++;
       }
-      return { ...q, isCorrect, userAnswer };
+      return { ...q, isCorrect, userAnswer, earnedPoints, hintCount };
     }).filter(Boolean); // Remove nulls
 
     const difficultyBreakdown = details.reduce((acc: any, q: any) => {
       if (!acc[q.difficulty]) acc[q.difficulty] = { total: 0, correct: 0, score: 0 };
       acc[q.difficulty].total++;
-      acc[q.difficulty].score += q.points;
+      acc[q.difficulty].score += q.points; // Total possible score
       if (q.isCorrect) acc[q.difficulty].correct++;
       return acc;
     }, {} as Record<Difficulty, { total: number, correct: number, score: number }>);
 
-    return { totalScore: parseFloat(totalScore.toFixed(1)), correctCount, details, difficultyBreakdown };
-  }, [userAnswers, hasUnlockedHidden]);
+    return { totalScore: parseFloat(totalScore.toFixed(2)), correctCount, details, difficultyBreakdown };
+  }, [userAnswers, hasUnlockedHidden, hintsRevealed]);
 
   return (
     <>
@@ -756,6 +846,8 @@ export default function App() {
           handleAnswer={handleAnswer}
           handleSubmit={gameState === 'exam' && currentQIndex === 20 ? () => setGameState('result') : handleExamSubmit}
           isCursedMode={hasUnlockedHidden}
+          hintsRevealed={hintsRevealed}
+          handleRevealHint={handleRevealHint}
         />
       )}
       {gameState === 'nameInput' && (
